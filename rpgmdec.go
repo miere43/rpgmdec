@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -63,11 +64,6 @@ func decryptWorker(wg *sync.WaitGroup, jobs chan string) {
 }
 
 func DecryptDir(name string) error {
-	entries, err := os.ReadDir(name)
-	if err != nil {
-		return err
-	}
-
 	jobs := make(chan string)
 	wg := &sync.WaitGroup{}
 	numWorkers := runtime.GOMAXPROCS(0)
@@ -76,17 +72,21 @@ func DecryptDir(name string) error {
 		go decryptWorker(wg, jobs)
 	}
 
-	for _, entry := range entries {
+	err := filepath.WalkDir(name, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
 		if entry.IsDir() {
-			continue
+			return nil
 		}
 
-		baseName := entry.Name()
-		if !strings.HasSuffix(baseName, ".rpgmvp") {
-			continue
+		if strings.HasSuffix(path, ".rpgmvp") {
+			jobs <- path
 		}
-
-		jobs <- filepath.Join(name, baseName)
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	close(jobs)
