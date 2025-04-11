@@ -34,16 +34,14 @@ func decrypt(name string) error {
 	if len(file) < len(rpgmvpHeader)+len(pngHeader) {
 		return fmt.Errorf("file is too small")
 	}
-	for i := 0; i < len(rpgmvpHeader); i++ {
+	for i := range rpgmvpHeader {
 		if file[i] != rpgmvpHeader[i] {
 			return fmt.Errorf("invalid magic")
 		}
 	}
 
 	file = file[len(rpgmvpHeader):]
-	for i := 0; i < len(pngHeader); i++ {
-		file[i] = pngHeader[i]
-	}
+	copy(file, pngHeader)
 
 	ext := filepath.Ext(name)
 	newName := name[:len(name)-len(ext)] + ".png"
@@ -67,7 +65,7 @@ func DecryptDir(name string) error {
 	jobs := make(chan string)
 	wg := &sync.WaitGroup{}
 	numWorkers := runtime.GOMAXPROCS(0)
-	for i := 0; i < numWorkers; i++ {
+	for range numWorkers {
 		wg.Add(1)
 		go decryptWorker(wg, jobs)
 	}
@@ -76,11 +74,7 @@ func DecryptDir(name string) error {
 		if err != nil {
 			return err
 		}
-		if entry.IsDir() {
-			return nil
-		}
-
-		if strings.HasSuffix(path, ".rpgmvp") {
+		if !entry.IsDir() && (strings.HasSuffix(path, ".rpgmvp") || strings.HasSuffix(path, ".png_")) {
 			jobs <- path
 		}
 		return nil
