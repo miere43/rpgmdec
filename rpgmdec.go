@@ -6,9 +6,10 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 var rpgmvpHeader = []byte{
@@ -24,6 +25,9 @@ var pngHeader = []byte{
 	// Chunk type: "IHDR"
 	0x49, 0x48, 0x44, 0x52,
 }
+
+var jobsCreated atomic.Int32
+var jobsFinished atomic.Int32
 
 func decrypt(name string) error {
 	file, err := os.ReadFile(name)
@@ -58,6 +62,24 @@ func decryptWorker(wg *sync.WaitGroup, jobs chan string) {
 		if err := decrypt(name); err != nil {
 			log.Printf("failed to decrypt %q: %v\n", name, err)
 		}
+		jobsFinished.Add(1)
+	}
+}
+
+func printProgressWorker(wg *sync.WaitGroup, done <-chan struct{}) {
+	defer wg.Done()
+
+	started := time.Now()
+
+	for {
+		select {
+		case <-done:
+			fmt.Printf("Processed %d/%d files...\n", jobsFinished.Load(), jobsCreated.Load())
+			fmt.Printf("Done in %v\n", time.Now().Sub(started))
+			return
+		case <-time.After(time.Millisecond * 300):
+			fmt.Printf("Processed %d/%d files...\n", jobsFinished.Load(), jobsCreated.Load())
+		}
 	}
 }
 
@@ -70,11 +92,17 @@ func DecryptDir(name string) error {
 		go decryptWorker(wg, jobs)
 	}
 
+	printWG := &sync.WaitGroup{}
+	printWG.Add(1)
+	printDone := make(chan struct{})
+	go printProgressWorker(printWG, printDone)
+
 	err := filepath.WalkDir(name, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if !entry.IsDir() && (strings.HasSuffix(path, ".rpgmvp") || strings.HasSuffix(path, ".png_")) {
+			jobsCreated.Add(1)
 			jobs <- path
 		}
 		return nil
@@ -85,6 +113,9 @@ func DecryptDir(name string) error {
 
 	close(jobs)
 	wg.Wait()
+
+	close(printDone)
+	printWG.Wait()
 
 	return nil
 }
